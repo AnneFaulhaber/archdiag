@@ -1,0 +1,6 @@
+__pycache__/
+*.png
+*.pdf
+*.gv
+.venv/
+.vscode/
