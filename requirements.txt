@@ -1,3 +1,4 @@
 pyyaml
 graphviz
 diagrams
+mcp>=1.0.0
