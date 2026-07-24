@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "archdiag": {
+      "command": "/Users/anne/Documents/archdiag/.venv/bin/python",
+      "args": ["/Users/anne/Documents/archdiag/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/Users/anne/Documents/archdiag"
+      }
+    }
+  }
+}

@@ -1,56 +1,86 @@
 # OpenShift Must-Gather Visualizer
 
-A Python utility that transforms OpenShift `must-gather` archives into architectural diagrams. It automatically parses cluster versions, node roles, networking CIDRs, and storage classes.
+A Python utility that transforms OpenShift `must-gather` archives into architectural diagrams. It parses cluster versions, node roles, networking CIDRs, storage classes, and related metadata.
 
 ## Features
-* **Multi-format Support**: Works with `.zip`, `.tar`, `.tar.gz`, and `.tgz` archives.
-* **Dynamic Path Discovery**: Automatically finds the `openshift-release-dev` pathing inside the bundle.
-* **Visual Architecture**: Generates a professional diagram using Kubernetes-standard icons(https://diagrams.mingrammer.com/) or graphiz-native rendering.
-* **Resource Parsing**: Extracts CPU/Memory (normalized to GiB), Network Types, and Storage Class defaults.
+* **Multi-format support**: `.zip`, `.tar`, `.tar.gz`, `.tgz`
+* **Dynamic path discovery**: Finds the `openshift-release-dev` prefix inside the archive
+* **Exclusive role grouping**: Control plane → infra → worker → other (no double-counting)
+* **Red Hat brand styling**: Colours from [brand.redhat.com](https://www.redhat.com/en/about/brand/standards) (`rh_brand.py`)
+* **Graphviz architecture diagram**: equal-width panels with dense per-node metadata
+* **Namespace topology (draft)**: Console Developer–like view for one project (`-n`), from must-gather or `oc adm inspect`
+* **MCP server**: expose diagram tools to Cursor / Claude Desktop (`mcp_server.py`)
+* **Rich metadata**: CPU/memory (normalized), Ready status, IPs, API/console URLs, topology, MTU, storage provisioners
 
 ## Prerequisites
-1.  **Python 3.8+**
-2.  **Graphviz**: The system-level engine for drawing diagrams.
-    * *macOS*: `brew install graphviz`
-    * *Ubuntu/Debian*: `sudo apt-get install graphviz`
-    * *Windows*: `choco install graphviz`
+1. **Python 3.11+** (3.8+ for CLI scripts alone)
+2. **Graphviz** (system package)
+   * macOS: `brew install graphviz`
+   * Ubuntu/Debian: `sudo apt-get install graphviz`
+   * Windows: `choco install graphviz`
+3. **Red Hat fonts** (optional): [RedHatOfficial/RedHatFont](https://github.com/RedHatOfficial/RedHatFont) — diagrams fall back to Helvetica
 
 ## Installation
-Clone this repository and install the dependencies:
 ```bash
 git clone <your-repo-url>
 cd <your-repo-name>
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## How to use
-
-### 1. Collect your Must-Gather
-Run the standard OpenShift command to collect cluster data:
-
+## Collect a must-gather
 ```bash
 oc adm must-gather --dest-dir=./my-cluster-data
+# then archive the directory, or point the scripts at an existing .tar.gz
 ```
 
-### Running the Script
-Run the script and follow the interactive prompt:
+## Usage
+
+### Graphviz architecture
+```bash
+python openshift_diagram_standard.py /path/to/must-gather.tar.gz
+
+# Custom output prefix
+python openshift_diagram_standard.py /path/to/must-gather.tar.gz -o my-cluster
+```
+
+### Namespace topology (draft)
+Console Developer–like view of one project, using [mingrammer](https://diagrams.mingrammer.com/docs/getting-started/examples) Kubernetes patterns (exposed Deployment replicas + StatefulSet storage).
 
 ```bash
-python openshift_diagram_standard.py
+# Prefer a focused inspect of the project
+oc adm inspect ns/myapp --dest-dir=./inspect-myapp
+
+python openshift_diagram_namespace.py ./inspect-myapp -n myapp
+python openshift_diagram_namespace.py must-gather.tar.gz -n openshift-monitoring -o mon-topo
 ```
 
-or
+`--namespace` / `-n` is required. Parser: `openshift_ns.py`.
 
+If you omit the archive path, the cluster diagram script prompts interactively.
+
+### MCP server (Cursor)
+Project config is in `.cursor/mcp.json`. After install, enable the **archdiag** server in Cursor MCP settings (or restart Cursor).
+
+Tools:
+| Tool | Purpose |
+|------|---------|
+| `list_namespaces` | Discover namespaces in an archive / inspect tree |
+| `analyze_cluster` | Must-gather cluster metadata (JSON) |
+| `generate_cluster_diagram` | Cluster architecture PNG (+ PDF) |
+| `analyze_namespace_topology` | Namespace topology model (JSON) |
+| `generate_namespace_diagram` | Namespace topology PNG |
+
+Manual stdio run:
 ```bash
-python openshift_diagram_icons.py
+source .venv/bin/activate
+PYTHONPATH=. python mcp_server.py
 ```
 
+Shared parsing: `openshift_mg.py`  
+Brand tokens: `rh_brand.py` (nodes = teal family; network/storage/ingress = gray + interaction-blue)
 
-### Execution Steps
-1. When prompted, provide the full path to your archive: Please enter the path to the OpenShift Must Gather ZIP or TAR.GZ/TAR file: /path/to/must-gather.tar.gz
-1. The script will detect the internal path prefix and parse the YAML files.
-1. The script will output progress to the console, identifying the number of nodes and storage classes found.
-
-### Output Files
-* openshift_k8s_icons.png: A visual diagram using Kubernetes icons.
-* openshift_architecture.gv.png / .pdf: (Optional) A Graphviz-native rendering of the cluster state.
+## Output files
+* `openshift_architecture.png` / `.pdf` — Graphviz cluster diagram
+* `openshift_ns_<namespace>.png` — Namespace topology (draft)
