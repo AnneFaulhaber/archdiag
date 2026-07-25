@@ -29,7 +29,7 @@ from mcp.server.fastmcp import FastMCP, Image
 
 from openshift_diagram_namespace import generate_namespace_diagram
 from openshift_diagram_standard import generate_diagram
-from openshift_mg import analyze_must_gather, get_member_list, open_archive
+from openshift_mg import analyze_must_gather_auto, get_member_list, open_archive
 from openshift_ns import analyze_namespace
 
 mcp = FastMCP(
@@ -155,10 +155,10 @@ def analyze_cluster(must_gather: str) -> str:
     """Parse a must-gather archive and return cluster metadata as JSON (no diagram).
 
     Args:
-        must_gather: Path to must-gather .zip / .tar / .tar.gz / .tgz.
+        must_gather: Path to must-gather .zip / .tar / .tar.gz / .tgz, or an extracted must-gather directory.
     """
     must_gather = str(Path(must_gather).expanduser())
-    data = analyze_must_gather(must_gather)
+    data = analyze_must_gather_auto(must_gather)
     if not data:
         return json.dumps({"error": "Failed to parse must-gather (empty or unsupported)."})
     return json.dumps(_cluster_summary(data), indent=2)
@@ -173,12 +173,12 @@ def generate_cluster_diagram(
     """Generate a Graphviz cluster architecture diagram (nodes, network, storage, ingress).
 
     Args:
-        must_gather: Path to must-gather .zip / .tar / .tar.gz / .tgz.
+        must_gather: Path to must-gather .zip / .tar / .tar.gz / .tgz, or an extracted must-gather directory.
         output_dir: Directory for PNG/PDF output (default: temp dir).
         output_prefix: Filename prefix without extension.
     """
     must_gather = str(Path(must_gather).expanduser())
-    data = analyze_must_gather(must_gather)
+    data = analyze_must_gather_auto(must_gather)
     if not data:
         return ["Failed to parse must-gather (empty or unsupported)."]
 
