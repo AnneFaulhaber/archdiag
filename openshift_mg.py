@@ -2,14 +2,16 @@
 Shared OpenShift must-gather parsing for architecture diagrams.
 
 Extracts cluster metadata, exclusive node role buckets, network, storage,
-and ingress details from ZIP / TAR / TAR.GZ archives.
+and ingress details from ZIP / TAR / TAR.GZ archives or extracted directories.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import tarfile
 import zipfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
@@ -566,3 +568,236 @@ def analyze_must_gather(must_gather_path: str) -> Optional[dict]:
                 file_handle.close()
             except Exception:
                 pass
+
+
+def _find_data_root(root: Path) -> Optional[Path]:
+    """Walk an extracted must-gather tree to find the directory containing
+    cluster-scoped-resources/.  Prefer paths containing openshift-release-dev."""
+    candidates: List[Path] = []
+    for dirpath, dirnames, _filenames in os.walk(root):
+        if "cluster-scoped-resources" in dirnames:
+            p = Path(dirpath)
+            if "openshift-release-dev" in str(p):
+                return p
+            candidates.append(p)
+    return candidates[0] if candidates else None
+
+
+def _parse_yaml_file(path: Path) -> Optional[dict]:
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Error parsing {path}: {e}")
+        return None
+
+
+def _extract_node_data_dir(nodes_dir: Path) -> List[dict]:
+    nodes: List[dict] = []
+    if not nodes_dir.is_dir():
+        return nodes
+    for yaml_file in sorted(nodes_dir.rglob("*.yaml")):
+        node_yaml = _parse_yaml_file(yaml_file)
+        if not node_yaml:
+            continue
+        try:
+            meta = node_yaml.get("metadata") or {}
+            status = node_yaml.get("status") or {}
+            name = meta.get("name")
+            if not name:
+                continue
+
+            roles = [
+                key.replace("node-role.kubernetes.io/", "")
+                for key in (meta.get("labels") or {})
+                if key.startswith("node-role.kubernetes.io/")
+            ]
+            if not roles:
+                roles = ["node"]
+
+            bucket, primary, secondary = classify_roles(roles)
+            capacity = status.get("capacity") or {}
+            allocatable = status.get("allocatable") or {}
+            node_info = status.get("nodeInfo") or {}
+
+            nodes.append(
+                {
+                    "name": name,
+                    "short_name": short_hostname(name),
+                    "roles": roles,
+                    "bucket": bucket,
+                    "primary_role": primary,
+                    "secondary_roles": secondary,
+                    "cpu": capacity.get("cpu", "N/A"),
+                    "memory": parse_memory_to_gib(capacity.get("memory", "N/A")),
+                    "cpu_allocatable": allocatable.get("cpu", "N/A"),
+                    "memory_allocatable": parse_memory_to_gib(
+                        allocatable.get("memory", "N/A")
+                    ),
+                    "ready": _node_ready(status),
+                    "internal_ip": _internal_ip(status),
+                    "os_image": node_info.get("osImage", "N/A"),
+                    "architecture": node_info.get("architecture", "N/A"),
+                    "kubelet": node_info.get("kubeletVersion", "N/A"),
+                }
+            )
+        except KeyError as e:
+            print(f"Skipping node {yaml_file} due to missing key: {e}")
+
+    nodes.sort(key=lambda n: (n["bucket"], n["short_name"]))
+    return nodes
+
+
+def _extract_storage_class_data_dir(storage_dir: Path) -> List[dict]:
+    storage_classes: List[dict] = []
+    if not storage_dir.is_dir():
+        return storage_classes
+    for yaml_file in sorted(storage_dir.rglob("*.yaml")):
+        sc_yaml = _parse_yaml_file(yaml_file)
+        if not sc_yaml:
+            continue
+        try:
+            meta = sc_yaml.get("metadata") or {}
+            annotations = meta.get("annotations") or {}
+            is_default = (
+                annotations.get("storageclass.kubernetes.io/is-default-class")
+                == "true"
+            )
+            storage_classes.append(
+                {
+                    "name": meta.get("name", "N/A"),
+                    "provisioner": sc_yaml.get("provisioner", "N/A"),
+                    "default": is_default,
+                    "reclaim_policy": sc_yaml.get("reclaimPolicy", "N/A"),
+                }
+            )
+        except KeyError as e:
+            print(f"Skipping storage class {yaml_file} due to missing key: {e}")
+
+    storage_classes.sort(key=lambda s: (not s["default"], s["name"]))
+    return storage_classes
+
+
+def analyze_must_gather_dir(must_gather_path: str) -> Optional[dict]:
+    """Parse an extracted must-gather directory into a diagram-ready data dict."""
+    data: Dict[str, Any] = {
+        "cluster_name": "Unknown Cluster",
+        "cluster_id": "N/A",
+        "version": "N/A",
+        "channel": "N/A",
+        "version_state": "N/A",
+        "platform": "N/A",
+        "api_url": "N/A",
+        "api_internal_url": "N/A",
+        "console_url": "N/A",
+        "control_plane_topology": "N/A",
+        "infrastructure_topology": "N/A",
+        "network": {},
+        "ingress": {},
+        "nodes": [],
+        "buckets": {
+            "control-plane": [],
+            "infra": [],
+            "worker": [],
+            "other": [],
+        },
+        "storage_classes": [],
+    }
+
+    print(f"Analyzing Must Gather directory: {must_gather_path}")
+    root = Path(must_gather_path)
+
+    data_root = _find_data_root(root)
+    if not data_root:
+        print("Error: Could not find cluster-scoped-resources/ in directory tree.")
+        return None
+    print(f"Detected data root: {data_root}")
+
+    # ClusterVersion
+    version_path = data_root / CONFIG_PATHS["version"]
+    if version_path.is_file():
+        version_data = _parse_yaml_file(version_path)
+        if version_data:
+            status = version_data.get("status") or {}
+            desired = status.get("desired") or {}
+            data["version"] = desired.get("version") or status.get("version") or "N/A"
+            data["cluster_id"] = (version_data.get("spec") or {}).get(
+                "clusterID", "N/A"
+            )
+            data["channel"] = (version_data.get("spec") or {}).get("channel", "N/A")
+            history = status.get("history") or []
+            if history:
+                data["version_state"] = history[0].get("state", "N/A")
+            for cond in status.get("conditions") or []:
+                if cond.get("type") == "Available" and cond.get("status") == "True":
+                    data["version_state"] = data["version_state"] or "Completed"
+                    break
+
+    # Infrastructure
+    infra_path = data_root / CONFIG_PATHS["infrastructure"]
+    if infra_path.is_file():
+        infra_data = _parse_yaml_file(infra_path)
+        if infra_data:
+            status = infra_data.get("status") or {}
+            platform = status.get("platform") or (infra_data.get("spec") or {}).get(
+                "platform", "N/A"
+            )
+            data["platform"] = platform or "N/A"
+            data["cluster_name"] = (
+                status.get("infrastructureName")
+                or data["cluster_name"]
+            )
+            data["api_url"] = status.get("apiServerURL") or "N/A"
+            data["api_internal_url"] = status.get("apiServerInternalURI") or "N/A"
+            data["control_plane_topology"] = (
+                status.get("controlPlaneTopology") or "N/A"
+            )
+            data["infrastructure_topology"] = (
+                status.get("infrastructureTopology") or "N/A"
+            )
+
+    # Console URL
+    console_path = data_root / CONFIG_PATHS["console"]
+    if console_path.is_file():
+        console_data = _parse_yaml_file(console_path)
+        if console_data:
+            console_status = console_data.get("status") or {}
+            data["console_url"] = console_status.get("consoleURL") or "N/A"
+
+    # Network
+    network_path = data_root / CONFIG_PATHS["network"]
+    network_doc = _parse_yaml_file(network_path) if network_path.is_file() else None
+    data["network"] = extract_network_info(network_doc)
+
+    # Storage
+    print("Extracting storage class information...")
+    storage_dir = data_root / CONFIG_PATHS["storage_prefix"]
+    data["storage_classes"] = _extract_storage_class_data_dir(storage_dir)
+    print(f"Found {len(data['storage_classes'])} storage classes.")
+
+    # Ingress
+    ingress_path = data_root / CONFIG_PATHS["ingress"]
+    ingress_doc = _parse_yaml_file(ingress_path) if ingress_path.is_file() else None
+    data["ingress"] = extract_ingress_info(ingress_doc)
+
+    # Nodes
+    print("Extracting node information...")
+    nodes_dir = data_root / CONFIG_PATHS["nodes_prefix"]
+    data["nodes"] = _extract_node_data_dir(nodes_dir)
+    apply_display_names(data["nodes"], data.get("cluster_name"))
+    data["buckets"] = sort_buckets_health_first(bucket_nodes(data["nodes"]))
+    print(
+        f"Found {len(data['nodes'])} nodes "
+        f"(control-plane={len(data['buckets']['control-plane'])}, "
+        f"infra={len(data['buckets']['infra'])}, "
+        f"worker={len(data['buckets']['worker'])}, "
+        f"other={len(data['buckets']['other'])})."
+    )
+
+    return data
+
+
+def analyze_must_gather_auto(must_gather_path: str) -> Optional[dict]:
+    """Auto-detect archive vs directory and parse accordingly."""
+    if os.path.isdir(must_gather_path):
+        return analyze_must_gather_dir(must_gather_path)
+    return analyze_must_gather(must_gather_path)
