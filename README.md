@@ -3,27 +3,42 @@
 A Python utility that transforms OpenShift `must-gather` archives into architectural diagrams. It parses cluster versions, node roles, networking CIDRs, storage classes, and related metadata.
 
 ## Features
-* **Multi-format support**: `.zip`, `.tar`, `.tar.gz`, `.tgz`
+* **Multi-format support**: `.zip`, `.tar`, `.tar.gz`, `.tgz`, and extracted directories
 * **Dynamic path discovery**: Finds the `openshift-release-dev` prefix inside the archive
-* **Exclusive role grouping**: Control plane → infra → worker → other (no double-counting)
+* **Exclusive role grouping**: Control plane, infra, worker, other (no double-counting)
 * **Red Hat brand styling**: Colours from [brand.redhat.com](https://www.redhat.com/en/about/brand/standards) (`rh_brand.py`)
 * **Graphviz architecture diagram**: equal-width panels with dense per-node metadata
-* **Namespace topology (draft)**: Console Developer–like view for one project (`-n`), from must-gather or `oc adm inspect`
-* **MCP server**: expose diagram tools to Cursor / Claude Desktop (`mcp_server.py`)
-* **Rich metadata**: CPU/memory (normalized), Ready status, IPs, API/console URLs, topology, MTU, storage provisioners
+* **Namespace topology (draft)**: Console Developer-like view for one project (`-n`), from must-gather or `oc adm inspect`
+* **MCP server**: expose diagram tools to Claude Code, Cursor, or any MCP client
 
 ## Prerequisites
-1. **Python 3.11+** (3.8+ for CLI scripts alone)
+1. **Python 3.10+**
 2. **Graphviz** (system package)
+   * Fedora/RHEL: `sudo dnf install graphviz`
    * macOS: `brew install graphviz`
    * Ubuntu/Debian: `sudo apt-get install graphviz`
-   * Windows: `choco install graphviz`
-3. **Red Hat fonts** (optional): [RedHatOfficial/RedHatFont](https://github.com/RedHatOfficial/RedHatFont) — diagrams fall back to Helvetica
+3. **Red Hat fonts** (optional): [RedHatOfficial/RedHatFont](https://github.com/RedHatOfficial/RedHatFont) -- diagrams fall back to Helvetica
 
 ## Installation
+
+### Option 1: uv tool install (recommended)
+
+Installs `archdiag-mcp` as a standalone tool. No clone, no venv, no PYTHONPATH needed.
+
 ```bash
-git clone <your-repo-url>
-cd <your-repo-name>
+uv tool install git+https://github.com/AnneFaulhaber/archdiag.git
+```
+
+Update:
+```bash
+uv tool upgrade archdiag
+```
+
+### Option 2: Clone and venv (for development)
+
+```bash
+git clone https://github.com/AnneFaulhaber/archdiag.git
+cd archdiag
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -35,35 +50,31 @@ oc adm must-gather --dest-dir=./my-cluster-data
 # then archive the directory, or point the scripts at an existing .tar.gz
 ```
 
-## Usage
+## MCP server
 
-### Graphviz architecture
+### Register with Claude Code
 ```bash
-python openshift_diagram_standard.py /path/to/must-gather.tar.gz
+# After uv tool install:
+claude mcp add -s user archdiag -- archdiag-mcp
 
-# Custom output prefix
-python openshift_diagram_standard.py /path/to/must-gather.tar.gz -o my-cluster
+# After clone + venv:
+claude mcp add -s user archdiag -- /path/to/archdiag/.venv/bin/python -m archdiag.mcp_server
 ```
 
-### Namespace topology (draft)
-Console Developer–like view of one project, using [mingrammer](https://diagrams.mingrammer.com/docs/getting-started/examples) Kubernetes patterns (exposed Deployment replicas + StatefulSet storage).
-
-```bash
-# Prefer a focused inspect of the project
-oc adm inspect ns/myapp --dest-dir=./inspect-myapp
-
-python openshift_diagram_namespace.py ./inspect-myapp -n myapp
-python openshift_diagram_namespace.py must-gather.tar.gz -n openshift-monitoring -o mon-topo
+### Register with Cursor
+After `uv tool install`, update `.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "archdiag": {
+      "command": "archdiag-mcp",
+      "args": []
+    }
+  }
+}
 ```
 
-`--namespace` / `-n` is required. Parser: `openshift_ns.py`.
-
-If you omit the archive path, the cluster diagram script prompts interactively.
-
-### MCP server (Cursor)
-Project config is in `.cursor/mcp.json`. After install, enable the **archdiag** server in Cursor MCP settings (or restart Cursor).
-
-Tools:
+### Tools
 | Tool | Purpose |
 |------|---------|
 | `list_namespaces` | Discover namespaces in an archive / inspect tree |
@@ -72,15 +83,36 @@ Tools:
 | `analyze_namespace_topology` | Namespace topology model (JSON) |
 | `generate_namespace_diagram` | Namespace topology PNG |
 
-Manual stdio run:
+## CLI usage
+
 ```bash
-source .venv/bin/activate
-PYTHONPATH=. python mcp_server.py
+# After uv tool install, the entry point is archdiag-mcp (MCP stdio server).
+# For direct CLI diagram generation, use the package modules:
+python -m archdiag.openshift_diagram_standard /path/to/must-gather.tar.gz
+python -m archdiag.openshift_diagram_standard /path/to/must-gather.tar.gz -o my-cluster
+
+# Namespace topology (draft)
+python -m archdiag.openshift_diagram_namespace ./inspect-myapp -n myapp
+python -m archdiag.openshift_diagram_namespace must-gather.tar.gz -n openshift-monitoring -o mon-topo
 ```
 
-Shared parsing: `openshift_mg.py`  
-Brand tokens: `rh_brand.py` (nodes = teal family; network/storage/ingress = gray + interaction-blue)
+`--namespace` / `-n` is required for namespace diagrams.
+
+## Project structure
+
+```
+archdiag/                  # Python package
+  __init__.py
+  mcp_server.py            # MCP server entry point
+  openshift_mg.py          # Must-gather parser
+  openshift_ns.py          # Namespace-scoped parser
+  openshift_diagram_standard.py  # Graphviz cluster diagram
+  openshift_diagram_namespace.py # Namespace topology diagram
+  rh_brand.py              # Red Hat brand tokens
+pyproject.toml             # Package metadata and dependencies
+requirements.txt           # For venv-based development
+```
 
 ## Output files
-* `openshift_architecture.png` / `.pdf` — Graphviz cluster diagram
-* `openshift_ns_<namespace>.png` — Namespace topology (draft)
+* `openshift_architecture.png` / `.pdf` -- Graphviz cluster diagram
+* `openshift_ns_<namespace>.png` -- Namespace topology (draft)

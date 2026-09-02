@@ -5,3 +5,6 @@ __pycache__/
 *.dot
 .venv/
 .vscode/
+archdiag.egg-info/
+build/
+dist/
