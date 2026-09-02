@@ -29,7 +29,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from openshift_mg import (
+from .openshift_mg import (
     ArchiveHandle,
     find_and_parse_yaml,
     get_member_list,

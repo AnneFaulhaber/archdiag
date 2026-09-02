@@ -26,8 +26,8 @@ from diagrams.k8s.compute import DaemonSet, Deployment, Pod, ReplicaSet, Statefu
 from diagrams.k8s.network import Ingress, Service
 from diagrams.k8s.storage import PV, PVC, StorageClass
 
-import rh_brand as rh
-from openshift_ns import analyze_namespace
+from . import rh_brand as rh
+from .openshift_ns import analyze_namespace
 
 # OpenShift Route has no first-class diagrams.k8s icon; reuse Ingress styling
 # with an explicit "Route" label (Console shows Route as the public URL edge).

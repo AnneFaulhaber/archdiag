@@ -22,8 +22,8 @@ from typing import Dict, List, Optional, Tuple
 
 from graphviz import Digraph
 
-import rh_brand as rh
-from openshift_mg import analyze_must_gather
+from . import rh_brand as rh
+from .openshift_mg import analyze_must_gather
 
 
 def _esc(value) -> str:

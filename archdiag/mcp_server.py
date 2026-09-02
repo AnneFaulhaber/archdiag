@@ -27,10 +27,10 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from openshift_diagram_namespace import generate_namespace_diagram
-from openshift_diagram_standard import generate_diagram
-from openshift_mg import analyze_must_gather_auto, get_member_list, open_archive
-from openshift_ns import analyze_namespace
+from .openshift_diagram_namespace import generate_namespace_diagram
+from .openshift_diagram_standard import generate_diagram
+from .openshift_mg import analyze_must_gather_auto, get_member_list, open_archive
+from .openshift_ns import analyze_namespace
 
 mcp = FastMCP(
     "archdiag",
