@@ -229,7 +229,7 @@ def _nodes_block(
     buckets: Dict[str, List[dict]],
     all_nodes: Optional[List[dict]] = None,
 ) -> str:
-    from openshift_mg import fleet_stats
+    from .openshift_mg import fleet_stats
 
     blocks = []
     if all_nodes:
@@ -287,7 +287,7 @@ def generate_diagram(
     output_filename: str = "openshift_architecture",
 ) -> None:
     """Three equal-width section boxes with visible gaps between them."""
-    from openshift_mg import sort_buckets_health_first
+    from .openshift_mg import sort_buckets_health_first
 
     buckets = sort_buckets_health_first(
         {k: list(v) for k, v in (data.get("buckets") or {}).items()}
